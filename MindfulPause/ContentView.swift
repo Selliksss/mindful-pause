@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 private struct SavedState: Codable {
     let state: ContentView.TimerState
@@ -43,6 +44,7 @@ struct ContentView: View {
     ]
 
     private let userDefaultsKey = "MindfulPauseTimerState"
+    private let notificationId = "MindfulPauseTimerNotification"
 
     var body: some View {
         ZStack {
@@ -215,10 +217,12 @@ struct ContentView: View {
     private func startTimer() {
         let durationMinutes = Int.random(in: 6...15)
         let durationSeconds = durationMinutes * 60
-        endTime = Date().addingTimeInterval(TimeInterval(durationSeconds))
+        let fireDate = Date().addingTimeInterval(TimeInterval(durationSeconds))
+        endTime = fireDate
         remainingSeconds = durationSeconds
         state = .waiting
         saveState()
+        requestAndScheduleNotification(at: fireDate)
 
         timerTask = Task {
             while !Task.isCancelled {
@@ -239,6 +243,7 @@ struct ContentView: View {
         timerTask = nil
         endTime = nil
         state = .idle
+        cancelScheduledNotification()
         saveState()
     }
 
@@ -248,6 +253,7 @@ struct ContentView: View {
         endTime = nil
         trigger = ""
         state = .idle
+        cancelScheduledNotification()
         saveState()
     }
 
@@ -308,6 +314,35 @@ struct ContentView: View {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
+    }
+
+    private func requestAndScheduleNotification(at fireDate: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            scheduleNotification(at: fireDate)
+        }
+    }
+
+    private func scheduleNotification(at fireDate: Date) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [notificationId])
+
+        let interval = fireDate.timeIntervalSinceNow
+        guard interval > 0 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Таймер сработал"
+        content.body = "Можешь идти делать то, что хотел."
+        content.sound = .default
+
+        let notificationTrigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        let request = UNNotificationRequest(identifier: notificationId, content: content, trigger: notificationTrigger)
+        center.add(request)
+    }
+
+    private func cancelScheduledNotification() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notificationId])
     }
 
     private func formatTime(_ seconds: Int) -> String {
