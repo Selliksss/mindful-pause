@@ -1,21 +1,48 @@
 import SwiftUI
 
+private struct SavedState: Codable {
+    let state: ContentView.TimerState
+    let endTime: Date?
+    let trigger: String
+}
+
 struct ContentView: View {
-    enum TimerState {
+    enum TimerState: String, Codable {
         case idle
         case waiting
         case triggered
+        case resisted
+        case reflection
+        case tip
     }
 
     @State private var state: TimerState = .idle
     @State private var endTime: Date?
     @State private var remainingSeconds: Int = 0
     @State private var timerTask: Task<Void, Never>?
+    @State private var trigger: String = ""
+    @State private var currentTip: String = ""
+    @FocusState private var triggerFocused: Bool
 
     private let textColor = Color(red: 0.18, green: 0.20, blue: 0.18)
     private let mutedColor = Color(red: 0.40, green: 0.43, blue: 0.40)
     private let accentColor = Color(red: 0.54, green: 0.60, blue: 0.55)
     private let backgroundColor = Color(red: 0.96, green: 0.94, blue: 0.92)
+
+    private let tips = [
+        "Сделай три глубоких вдоха. Физиология успокаивается быстрее, чем думаешь.",
+        "Встань и пройдись по комнате. Движение разрывает замкнутый круг.",
+        "Умой лицо холодной водой. Это простая перезагрузка.",
+        "Позвони другу или напиши кому-то. Связь с другим человеком обнуляет тягу.",
+        "Запиши, что чувствуешь, одной фразой. Формулировка снимает напряжение.",
+        "Посмотри в окно 30 секунд. Переключи внимание на что-то внешнее.",
+        "Сделай 10 приседаний. Физическая нагрузка перехватывает управление у мозга.",
+        "Выпей стакан воды медленно. Вкус и ощущение возвращают в тело.",
+        "Открой дверь и выйди на воздух. Даже минута на улице меняет контекст.",
+        "Надень наушники и включи любой подкаст на 2 минуты. Переключение канала."
+    ]
+
+    private let userDefaultsKey = "MindfulPauseTimerState"
 
     var body: some View {
         ZStack {
@@ -26,11 +53,15 @@ struct ContentView: View {
                 case .idle:      idleView
                 case .waiting:   waitingView
                 case .triggered: triggeredView
+                case .resisted:  resistedView
+                case .reflection: reflectionView
+                case .tip:       tipView
                 }
             }
             .padding()
             .animation(.easeInOut(duration: 0.4), value: state)
         }
+        .onAppear { restoreState() }
     }
 
     private var idleView: some View {
@@ -83,6 +114,93 @@ struct ContentView: View {
                 .foregroundStyle(mutedColor)
                 .multilineTextAlignment(.center)
 
+            VStack(spacing: 12) {
+                Button("Я сделал(а)", action: goResisted)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 14)
+                    .background(accentColor)
+                    .clipShape(Capsule())
+
+                Button("Я передумал(а)", action: goReflection)
+                    .font(.system(size: 16, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 14)
+                    .background(accentColor)
+                    .clipShape(Capsule())
+            }
+            .padding(.top, 24)
+        }
+    }
+
+    private var resistedView: some View {
+        VStack(spacing: 16) {
+            Text("Окей.")
+                .font(.system(size: 28, weight: .light, design: .rounded))
+                .foregroundStyle(textColor)
+
+            Text("Ты увидел тягу. Ты подождал. Это уже движение.")
+                .font(.system(size: 18, weight: .light, design: .rounded))
+                .foregroundStyle(mutedColor)
+                .multilineTextAlignment(.center)
+
+            Button("Завершить", action: reset)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+                .background(accentColor)
+                .clipShape(Capsule())
+                .padding(.top, 24)
+        }
+    }
+
+    private var reflectionView: some View {
+        VStack(spacing: 16) {
+            Text("Что помогло прямо сейчас?\nЧто стало триггером?")
+                .font(.system(size: 28, weight: .light, design: .rounded))
+                .foregroundStyle(textColor)
+                .multilineTextAlignment(.center)
+
+            TextField("Опиши ситуацию", text: $trigger)
+                .font(.system(size: 16, weight: .light, design: .rounded))
+                .foregroundStyle(textColor)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(Color(red: 0.99, green: 0.97, blue: 0.95))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .focused($triggerFocused)
+                .submitLabel(.done)
+                .onSubmit {
+                    if !trigger.isEmpty { goTip() }
+                }
+                .padding(.top, 8)
+
+            Button("Получить подсказку", action: goTip)
+                .font(.system(size: 16, weight: .medium, design: .rounded))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+                .background(trigger.isEmpty ? mutedColor : accentColor)
+                .clipShape(Capsule())
+                .disabled(trigger.isEmpty)
+                .padding(.top, 8)
+        }
+    }
+
+    private var tipView: some View {
+        VStack(spacing: 16) {
+            Text("Запомни это — оно сработало.")
+                .font(.system(size: 28, weight: .light, design: .rounded))
+                .foregroundStyle(textColor)
+
+            Text(currentTip)
+                .font(.system(size: 18, weight: .light, design: .rounded))
+                .foregroundStyle(mutedColor)
+                .multilineTextAlignment(.center)
+
             Button("Завершить", action: reset)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
@@ -95,17 +213,19 @@ struct ContentView: View {
     }
 
     private func startTimer() {
-        let durationSeconds = 5
+        let durationMinutes = Int.random(in: 6...15)
+        let durationSeconds = durationMinutes * 60
         endTime = Date().addingTimeInterval(TimeInterval(durationSeconds))
         remainingSeconds = durationSeconds
         state = .waiting
+        saveState()
 
         timerTask = Task {
             while !Task.isCancelled {
                 guard let endTime else { break }
                 let remaining = Int(endTime.timeIntervalSinceNow)
                 if remaining <= 0 {
-                    await MainActor.run { self.state = .triggered }
+                    await MainActor.run { self.state = .triggered; self.saveState() }
                     break
                 }
                 await MainActor.run { self.remainingSeconds = remaining }
@@ -119,13 +239,75 @@ struct ContentView: View {
         timerTask = nil
         endTime = nil
         state = .idle
+        saveState()
     }
 
     private func reset() {
         timerTask?.cancel()
         timerTask = nil
         endTime = nil
+        trigger = ""
         state = .idle
+        saveState()
+    }
+
+    private func goResisted() {
+        trigger = ""
+        state = .resisted
+        saveState()
+    }
+
+    private func goReflection() {
+        state = .reflection
+        saveState()
+    }
+
+    private func goTip() {
+        triggerFocused = false
+        currentTip = tips.randomElement() ?? ""
+        state = .tip
+        saveState()
+    }
+
+    private func saveState() {
+        let data = SavedState(state: state, endTime: endTime, trigger: trigger)
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: userDefaultsKey)
+        }
+    }
+
+    private func restoreState() {
+        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+              let saved = try? JSONDecoder().decode(SavedState.self, from: data) else { return }
+        state = saved.state
+        endTime = saved.endTime
+        trigger = saved.trigger
+
+        if state == .waiting, let endTime, endTime <= Date() {
+            self.endTime = nil
+            state = .triggered
+            return
+        }
+
+        if state == .waiting {
+            remainingSeconds = max(0, Int(endTime?.timeIntervalSinceNow ?? 0))
+            startTimerFromSaved()
+        }
+    }
+
+    private func startTimerFromSaved() {
+        timerTask = Task {
+            while !Task.isCancelled {
+                guard let endTime else { break }
+                let remaining = Int(endTime.timeIntervalSinceNow)
+                if remaining <= 0 {
+                    await MainActor.run { self.state = .triggered; self.saveState() }
+                    break
+                }
+                await MainActor.run { self.remainingSeconds = remaining }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
     }
 
     private func formatTime(_ seconds: Int) -> String {
