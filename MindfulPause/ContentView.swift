@@ -22,7 +22,7 @@ struct ContentView: View {
     @State private var remainingSeconds: Int = 0
     @State private var timerTask: Task<Void, Never>?
     @State private var trigger: String = ""
-    @State private var currentTip: String = ""
+    @State private var currentTip: LocalizedStringResource?
     @FocusState private var triggerFocused: Bool
 
     private let textColor = Color(red: 0.18, green: 0.15, blue: 0.10)
@@ -30,17 +30,17 @@ struct ContentView: View {
     private let accentColor = Color(red: 0.46, green: 0.52, blue: 0.42)
     private let backgroundColor = Color(red: 0.88, green: 0.82, blue: 0.73)
 
-    private let tips = [
-        "Сделай три глубоких вдоха. Физиология успокаивается быстрее, чем думаешь.",
-        "Встань и пройдись по комнате. Движение разрывает замкнутый круг.",
-        "Умой лицо холодной водой. Это простая перезагрузка.",
-        "Позвони другу или напиши кому-то. Связь с другим человеком обнуляет тягу.",
-        "Запиши, что чувствуешь, одной фразой. Формулировка снимает напряжение.",
-        "Посмотри в окно 30 секунд. Переключи внимание на что-то внешнее.",
-        "Сделай 10 приседаний. Физическая нагрузка перехватывает управление у мозга.",
-        "Выпей стакан воды медленно. Вкус и ощущение возвращают в тело.",
-        "Открой дверь и выйди на воздух. Даже минута на улице меняет контекст.",
-        "Надень наушники и включи любой подкаст на 2 минуты. Переключение канала."
+    private let tips: [LocalizedStringResource] = [
+        "Take three deep breaths. Physiology calms down faster than you think.",
+        "Stand up and walk around the room. Movement breaks the loop.",
+        "Splash cold water on your face. Simple reset.",
+        "Call or text a friend. Connection resets the urge.",
+        "Write what you're feeling in one phrase. Naming reduces tension.",
+        "Look out the window for 30 seconds. Shift attention outward.",
+        "Do 10 squats. Physical effort takes control back from the brain.",
+        "Drink a glass of water slowly. Taste and sensation bring you back to your body.",
+        "Open the door and step outside. Even a minute of fresh air shifts the context.",
+        "Put on headphones and play any podcast for 2 minutes. Channel switch."
     ]
 
     private let userDefaultsKey = "MindfulPauseTimerState"
@@ -69,14 +69,14 @@ struct ContentView: View {
 
     private var idleView: some View {
         VStack(spacing: 32) {
-            Text("Подожди.\nДай мозгу время переключиться.")
+            Text("Wait.\nGive your brain time to switch.")
                 .font(.system(size: 20, weight: .light, design: .rounded))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(mutedColor)
                 .padding(.bottom, 16)
 
             Button(action: startTimer) {
-                Text("Запустить таймер")
+                Text("Start timer")
                     .font(.system(size: 22, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 48)
@@ -89,7 +89,7 @@ struct ContentView: View {
 
     private var waitingView: some View {
         VStack(spacing: 24) {
-            Text("Просто подожди.\nНе нужно бороться.")
+            Text("Just wait.\nNo need to fight.")
                 .font(.system(size: 18, weight: .light, design: .rounded))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(mutedColor)
@@ -99,7 +99,7 @@ struct ContentView: View {
                 .monospacedDigit()
                 .foregroundStyle(textColor)
 
-            Button("Отменить", action: cancelTimer)
+            Button("Cancel", action: cancelTimer)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(textColor)
                 .padding(.top, 16)
@@ -108,17 +108,17 @@ struct ContentView: View {
 
     private var triggeredView: some View {
         VStack(spacing: 16) {
-            Text("Таймер сработал.")
+            Text("Timer is up")
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
 
-            Text("Можешь идти делать то, что хотел.")
+            Text("You can go do what you wanted.")
                 .font(.system(size: 18, weight: .light, design: .rounded))
                 .foregroundStyle(mutedColor)
                 .multilineTextAlignment(.center)
 
             VStack(spacing: 12) {
-                Button("Я сделал(а)", action: goResisted)
+                Button("I did it", action: goResisted)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 32)
@@ -126,7 +126,7 @@ struct ContentView: View {
                     .background(accentColor)
                     .clipShape(Capsule())
 
-                Button("Я передумал(а)", action: goReflection)
+                Button("I changed my mind", action: goReflection)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 32)
@@ -140,16 +140,16 @@ struct ContentView: View {
 
     private var resistedView: some View {
         VStack(spacing: 16) {
-            Text("Окей.")
+            Text("Okay.")
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
 
-            Text("Ты увидел тягу. Ты подождал. Это уже движение.")
+            Text("You noticed the urge. You waited. That's already movement.")
                 .font(.system(size: 18, weight: .light, design: .rounded))
                 .foregroundStyle(mutedColor)
                 .multilineTextAlignment(.center)
 
-            Button("Завершить", action: reset)
+            Button("Done", action: reset)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 32)
@@ -162,12 +162,12 @@ struct ContentView: View {
 
     private var reflectionView: some View {
         VStack(spacing: 16) {
-            Text("Что помогло прямо сейчас?\nЧто стало триггером?")
+            Text("What helped right now?\nWhat was the trigger?")
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
                 .multilineTextAlignment(.center)
 
-            TextField("Опиши ситуацию", text: $trigger)
+            TextField("Describe the situation", text: $trigger)
                 .font(.system(size: 16, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
                 .padding(.horizontal, 20)
@@ -181,7 +181,7 @@ struct ContentView: View {
                 }
                 .padding(.top, 8)
 
-            Button("Получить подсказку", action: goTip)
+            Button("Get a tip", action: goTip)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 32)
@@ -195,16 +195,18 @@ struct ContentView: View {
 
     private var tipView: some View {
         VStack(spacing: 16) {
-            Text("Запомни это — оно сработало.")
+            Text("Remember this — it worked.")
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
 
-            Text(currentTip)
-                .font(.system(size: 18, weight: .light, design: .rounded))
-                .foregroundStyle(mutedColor)
-                .multilineTextAlignment(.center)
+            if let currentTip {
+                Text(currentTip)
+                    .font(.system(size: 18, weight: .light, design: .rounded))
+                    .foregroundStyle(mutedColor)
+                    .multilineTextAlignment(.center)
+            }
 
-            Button("Завершить", action: reset)
+            Button("Done", action: reset)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 32)
@@ -280,7 +282,7 @@ struct ContentView: View {
     private func goTip() {
         haptic(.medium)
         triggerFocused = false
-        currentTip = tips.randomElement() ?? ""
+        currentTip = tips.randomElement()
         state = .tip
         saveState()
     }
@@ -342,8 +344,8 @@ struct ContentView: View {
         guard interval > 0 else { return }
 
         let content = UNMutableNotificationContent()
-        content.title = "Таймер сработал"
-        content.body = "Можешь идти делать то, что хотел."
+        content.title = String(localized: "Timer is up")
+        content.body = String(localized: "You can go do what you wanted.")
         content.sound = .default
 
         let notificationTrigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
