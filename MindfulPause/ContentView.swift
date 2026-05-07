@@ -5,6 +5,41 @@ private struct SavedState: Codable {
     let state: ContentView.TimerState
     let endTime: Date?
     let trigger: String
+    let outcome: ContentView.Outcome?
+}
+
+enum Habit: String, Codable, CaseIterable, Identifiable {
+    case smoking
+    case snus
+    case socialMedia
+    case alcohol
+    case food
+    case other
+
+    var id: String { rawValue }
+
+    var displayName: LocalizedStringResource {
+        switch self {
+        case .smoking:     return "Smoking"
+        case .snus:        return "Snus / vape"
+        case .socialMedia: return "Social media"
+        case .alcohol:     return "Alcohol"
+        case .food:        return "Overeating"
+        case .other:       return "Other"
+        }
+    }
+
+    // English label sent to the LLM as context (always English regardless of UI locale).
+    var llmContext: String {
+        switch self {
+        case .smoking:     return "smoking"
+        case .snus:        return "snus or vape"
+        case .socialMedia: return "doomscrolling on social media"
+        case .alcohol:     return "drinking alcohol"
+        case .food:        return "compulsive eating"
+        case .other:       return "a personal harmful habit"
+        }
+    }
 }
 
 struct ContentView: View {
@@ -12,9 +47,13 @@ struct ContentView: View {
         case idle
         case waiting
         case triggered
-        case resisted
         case reflection
         case tip
+    }
+
+    enum Outcome: String, Codable {
+        case resisted
+        case relapsed
     }
 
     @State private var state: TimerState = .idle
@@ -23,7 +62,12 @@ struct ContentView: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var trigger: String = ""
     @State private var currentTip: LocalizedStringResource?
+    @State private var outcome: Outcome?
     @FocusState private var triggerFocused: Bool
+
+    @State private var habit: Habit?
+    @State private var customHabit: String = ""
+    @State private var showOnboarding: Bool = false
 
     private let textColor = Color(red: 0.18, green: 0.15, blue: 0.10)
     private let mutedColor = Color(red: 0.42, green: 0.37, blue: 0.28)
@@ -44,27 +88,108 @@ struct ContentView: View {
     ]
 
     private let userDefaultsKey = "MindfulPauseTimerState"
+    private let habitKey = "MindfulPauseHabit"
+    private let customHabitKey = "MindfulPauseCustomHabit"
     private let notificationId = "MindfulPauseTimerNotification"
 
     var body: some View {
         ZStack {
             backgroundColor.ignoresSafeArea()
 
-            Group {
-                switch state {
-                case .idle:      idleView
-                case .waiting:   waitingView
-                case .triggered: triggeredView
-                case .resisted:  resistedView
-                case .reflection: reflectionView
-                case .tip:       tipView
+            if showOnboarding || habit == nil {
+                onboardingView
+                    .padding()
+                    .transition(.opacity)
+            } else {
+                Group {
+                    switch state {
+                    case .idle:      idleView
+                    case .waiting:   waitingView
+                    case .triggered: triggeredView
+                    case .reflection: reflectionView
+                    case .tip:       tipView
+                    }
+                }
+                .padding()
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.4), value: state)
+
+                if state == .idle {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: openOnboarding) {
+                                Text("Change habit")
+                                    .font(.system(size: 13, weight: .light, design: .rounded))
+                                    .foregroundStyle(mutedColor)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding()
                 }
             }
-            .padding()
-            .transition(.opacity)
-            .animation(.easeInOut(duration: 0.4), value: state)
         }
-        .onAppear { restoreState() }
+        .animation(.easeInOut(duration: 0.4), value: showOnboarding)
+        .animation(.easeInOut(duration: 0.4), value: habit)
+        .onAppear {
+            loadHabit()
+            restoreState()
+        }
+    }
+
+    private var onboardingView: some View {
+        VStack(spacing: 20) {
+            Text("What are you trying to delay?")
+                .font(.system(size: 24, weight: .light, design: .rounded))
+                .foregroundStyle(textColor)
+                .multilineTextAlignment(.center)
+                .padding(.bottom, 8)
+
+            ForEach(Habit.allCases) { h in
+                Button(action: { selectHabit(h) }) {
+                    Text(h.displayName)
+                        .font(.system(size: 17, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(habit == h ? accentColor.opacity(0.7) : accentColor)
+                        .clipShape(Capsule())
+                }
+            }
+
+            if habit == .other {
+                TextField("Type your habit", text: $customHabit)
+                    .font(.system(size: 16, weight: .light, design: .rounded))
+                    .foregroundStyle(textColor)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 14)
+                    .background(Color(red: 0.95, green: 0.91, blue: 0.84))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .submitLabel(.done)
+                    .onSubmit { confirmOnboarding() }
+            }
+
+            Button(action: confirmOnboarding) {
+                Text("Continue")
+                    .font(.system(size: 17, weight: .medium, design: .rounded))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 16)
+                    .background(canConfirmOnboarding ? accentColor : mutedColor)
+                    .clipShape(Capsule())
+            }
+            .disabled(!canConfirmOnboarding)
+            .padding(.top, 8)
+        }
+    }
+
+    private var canConfirmOnboarding: Bool {
+        guard let habit else { return false }
+        if habit == .other { return !customHabit.trimmingCharacters(in: .whitespaces).isEmpty }
+        return true
     }
 
     private var idleView: some View {
@@ -118,7 +243,7 @@ struct ContentView: View {
                 .multilineTextAlignment(.center)
 
             VStack(spacing: 12) {
-                Button("I did it", action: goResisted)
+                Button("I waited it out", action: markResisted)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 32)
@@ -126,7 +251,7 @@ struct ContentView: View {
                     .background(accentColor)
                     .clipShape(Capsule())
 
-                Button("I changed my mind", action: goReflection)
+                Button("I gave in", action: markRelapsed)
                     .font(.system(size: 16, weight: .medium, design: .rounded))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 32)
@@ -138,31 +263,17 @@ struct ContentView: View {
         }
     }
 
-    private var resistedView: some View {
-        VStack(spacing: 16) {
-            Text("Okay.")
-                .font(.system(size: 28, weight: .light, design: .rounded))
-                .foregroundStyle(textColor)
+    private var reflectionQuestion: LocalizedStringResource {
+        outcome == .relapsed ? "What was the trigger?" : "What helped right now?"
+    }
 
-            Text("You noticed the urge. You waited. That's already movement.")
-                .font(.system(size: 18, weight: .light, design: .rounded))
-                .foregroundStyle(mutedColor)
-                .multilineTextAlignment(.center)
-
-            Button("Done", action: reset)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 32)
-                .padding(.vertical, 14)
-                .background(accentColor)
-                .clipShape(Capsule())
-                .padding(.top, 24)
-        }
+    private var tipTitle: LocalizedStringResource {
+        outcome == .relapsed ? "No judgment. Just notice." : "Remember this — it worked."
     }
 
     private var reflectionView: some View {
         VStack(spacing: 16) {
-            Text("What helped right now?\nWhat was the trigger?")
+            Text(reflectionQuestion)
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
                 .multilineTextAlignment(.center)
@@ -195,9 +306,10 @@ struct ContentView: View {
 
     private var tipView: some View {
         VStack(spacing: 16) {
-            Text("Remember this — it worked.")
+            Text(tipTitle)
                 .font(.system(size: 28, weight: .light, design: .rounded))
                 .foregroundStyle(textColor)
+                .multilineTextAlignment(.center)
 
             if let currentTip {
                 Text(currentTip)
@@ -221,9 +333,39 @@ struct ContentView: View {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
 
+    private func selectHabit(_ h: Habit) {
+        haptic(.light)
+        habit = h
+    }
+
+    private func confirmOnboarding() {
+        guard canConfirmOnboarding, let habit else { return }
+        haptic(.medium)
+        UserDefaults.standard.set(habit.rawValue, forKey: habitKey)
+        if habit == .other {
+            UserDefaults.standard.set(customHabit.trimmingCharacters(in: .whitespaces), forKey: customHabitKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: customHabitKey)
+        }
+        showOnboarding = false
+    }
+
+    private func openOnboarding() {
+        haptic(.light)
+        showOnboarding = true
+    }
+
+    private func loadHabit() {
+        if let raw = UserDefaults.standard.string(forKey: habitKey),
+           let saved = Habit(rawValue: raw) {
+            habit = saved
+            customHabit = UserDefaults.standard.string(forKey: customHabitKey) ?? ""
+        }
+    }
+
     private func startTimer() {
         haptic(.medium)
-        let durationSeconds = 5
+        let durationSeconds = Int.random(in: 360...900)
         let fireDate = Date().addingTimeInterval(TimeInterval(durationSeconds))
         endTime = fireDate
         remainingSeconds = durationSeconds
@@ -261,20 +403,22 @@ struct ContentView: View {
         timerTask = nil
         endTime = nil
         trigger = ""
+        outcome = nil
         state = .idle
         cancelScheduledNotification()
         saveState()
     }
 
-    private func goResisted() {
+    private func markResisted() {
         haptic(.medium)
-        trigger = ""
-        state = .resisted
+        outcome = .resisted
+        state = .reflection
         saveState()
     }
 
-    private func goReflection() {
+    private func markRelapsed() {
         haptic(.medium)
+        outcome = .relapsed
         state = .reflection
         saveState()
     }
@@ -288,7 +432,7 @@ struct ContentView: View {
     }
 
     private func saveState() {
-        let data = SavedState(state: state, endTime: endTime, trigger: trigger)
+        let data = SavedState(state: state, endTime: endTime, trigger: trigger, outcome: outcome)
         if let encoded = try? JSONEncoder().encode(data) {
             UserDefaults.standard.set(encoded, forKey: userDefaultsKey)
         }
@@ -300,6 +444,7 @@ struct ContentView: View {
         state = saved.state
         endTime = saved.endTime
         trigger = saved.trigger
+        outcome = saved.outcome
 
         if state == .waiting, let endTime, endTime <= Date() {
             self.endTime = nil
