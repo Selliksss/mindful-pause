@@ -25,10 +25,10 @@ struct ContentView: View {
     @State private var currentTip: String = ""
     @FocusState private var triggerFocused: Bool
 
-    private let textColor = Color(red: 0.18, green: 0.20, blue: 0.18)
-    private let mutedColor = Color(red: 0.40, green: 0.43, blue: 0.40)
-    private let accentColor = Color(red: 0.54, green: 0.60, blue: 0.55)
-    private let backgroundColor = Color(red: 0.96, green: 0.94, blue: 0.92)
+    private let textColor = Color(red: 0.18, green: 0.15, blue: 0.10)
+    private let mutedColor = Color(red: 0.42, green: 0.37, blue: 0.28)
+    private let accentColor = Color(red: 0.46, green: 0.52, blue: 0.42)
+    private let backgroundColor = Color(red: 0.88, green: 0.82, blue: 0.73)
 
     private let tips = [
         "Сделай три глубоких вдоха. Физиология успокаивается быстрее, чем думаешь.",
@@ -50,7 +50,7 @@ struct ContentView: View {
         ZStack {
             backgroundColor.ignoresSafeArea()
 
-            VStack(spacing: 32) {
+            Group {
                 switch state {
                 case .idle:      idleView
                 case .waiting:   waitingView
@@ -61,6 +61,7 @@ struct ContentView: View {
                 }
             }
             .padding()
+            .transition(.opacity)
             .animation(.easeInOut(duration: 0.4), value: state)
         }
         .onAppear { restoreState() }
@@ -171,7 +172,7 @@ struct ContentView: View {
                 .foregroundStyle(textColor)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                .background(Color(red: 0.99, green: 0.97, blue: 0.95))
+                .background(Color(red: 0.95, green: 0.91, blue: 0.84))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .focused($triggerFocused)
                 .submitLabel(.done)
@@ -214,9 +215,13 @@ struct ContentView: View {
         }
     }
 
+    private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
+        UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
     private func startTimer() {
-        let durationMinutes = Int.random(in: 6...15)
-        let durationSeconds = durationMinutes * 60
+        haptic(.medium)
+        let durationSeconds = 5
         let fireDate = Date().addingTimeInterval(TimeInterval(durationSeconds))
         endTime = fireDate
         remainingSeconds = durationSeconds
@@ -239,6 +244,7 @@ struct ContentView: View {
     }
 
     private func cancelTimer() {
+        haptic(.light)
         timerTask?.cancel()
         timerTask = nil
         endTime = nil
@@ -248,6 +254,7 @@ struct ContentView: View {
     }
 
     private func reset() {
+        haptic(.light)
         timerTask?.cancel()
         timerTask = nil
         endTime = nil
@@ -258,17 +265,20 @@ struct ContentView: View {
     }
 
     private func goResisted() {
+        haptic(.medium)
         trigger = ""
         state = .resisted
         saveState()
     }
 
     private func goReflection() {
+        haptic(.medium)
         state = .reflection
         saveState()
     }
 
     private func goTip() {
+        haptic(.medium)
         triggerFocused = false
         currentTip = tips.randomElement() ?? ""
         state = .tip
