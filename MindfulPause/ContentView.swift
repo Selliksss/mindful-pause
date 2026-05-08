@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UserNotifications
 
 private struct SavedState: Codable {
@@ -61,20 +62,26 @@ struct ContentView: View {
     @State private var remainingSeconds: Int = 0
     @State private var timerTask: Task<Void, Never>?
     @State private var trigger: String = ""
-    @State private var currentTip: LocalizedStringResource?
+    @State private var currentTip: String?
+    @State private var isLoadingTip: Bool = false
     @State private var outcome: Outcome?
     @FocusState private var triggerFocused: Bool
 
-    @State private var habit: Habit?
-    @State private var customHabit: String = ""
-    @State private var showOnboarding: Bool = false
+    @State private var habit: Habit? = {
+        guard let raw = UserDefaults.standard.string(forKey: "MindfulPauseHabit") else { return nil }
+        return Habit(rawValue: raw)
+    }()
+    @State private var customHabit: String = UserDefaults.standard.string(forKey: "MindfulPauseCustomHabit") ?? ""
+    @State private var showOnboarding: Bool = UserDefaults.standard.string(forKey: "MindfulPauseHabit") == nil
 
     private let textColor = Color(red: 0.18, green: 0.15, blue: 0.10)
     private let mutedColor = Color(red: 0.42, green: 0.37, blue: 0.28)
     private let accentColor = Color(red: 0.46, green: 0.52, blue: 0.42)
     private let backgroundColor = Color(red: 0.88, green: 0.82, blue: 0.73)
 
-    private let tips: [LocalizedStringResource] = [
+    private let workerURL = URL(string: "https://mindful-pause-llm.vercel.app/api/tip")!
+
+    private let fallbackTips: [LocalizedStringResource] = [
         "Take three deep breaths. Physiology calms down faster than you think.",
         "Stand up and walk around the room. Movement breaks the loop.",
         "Splash cold water on your face. Simple reset.",
@@ -96,7 +103,7 @@ struct ContentView: View {
         ZStack {
             backgroundColor.ignoresSafeArea()
 
-            if showOnboarding || habit == nil {
+            if showOnboarding {
                 onboardingView
                     .padding()
                     .transition(.opacity)
@@ -311,11 +318,21 @@ struct ContentView: View {
                 .foregroundStyle(textColor)
                 .multilineTextAlignment(.center)
 
-            if let currentTip {
-                Text(currentTip)
-                    .font(.system(size: 18, weight: .light, design: .rounded))
-                    .foregroundStyle(mutedColor)
-                    .multilineTextAlignment(.center)
+            if isLoadingTip {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(mutedColor)
+                    .padding(.vertical, 24)
+            } else if let currentTip {
+                ScrollView {
+                    Text(currentTip)
+                        .font(.system(size: 18, weight: .light, design: .rounded))
+                        .foregroundStyle(mutedColor)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 4)
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: 260)
             }
 
             Button("Done", action: reset)
@@ -323,8 +340,9 @@ struct ContentView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 32)
                 .padding(.vertical, 14)
-                .background(accentColor)
+                .background(isLoadingTip ? mutedColor : accentColor)
                 .clipShape(Capsule())
+                .disabled(isLoadingTip)
                 .padding(.top, 24)
         }
     }
@@ -347,6 +365,7 @@ struct ContentView: View {
         } else {
             UserDefaults.standard.removeObject(forKey: customHabitKey)
         }
+        UserDefaults.standard.synchronize()
         showOnboarding = false
     }
 
@@ -426,9 +445,97 @@ struct ContentView: View {
     private func goTip() {
         haptic(.medium)
         triggerFocused = false
-        currentTip = tips.randomElement()
+        currentTip = nil
+        isLoadingTip = true
         state = .tip
         saveState()
+
+        let trigger = self.trigger
+        let outcome = self.outcome ?? .resisted
+        let habit = self.habit
+        let customHabit = self.customHabit
+
+        Task {
+            let aiTip = await fetchAITip(trigger: trigger, outcome: outcome, habit: habit, customHabit: customHabit)
+            await MainActor.run {
+                self.currentTip = aiTip ?? localFallbackTip()
+                self.isLoadingTip = false
+            }
+        }
+    }
+
+    private func fetchAITip(trigger: String, outcome: Outcome, habit: Habit?, customHabit: String) async -> String? {
+        let preferred = Bundle.main.preferredLocalizations.first ?? "en"
+        let lang = preferred.hasPrefix("ru") ? "ru" : "en"
+        print("[MindfulPause] preferredLocalization: \(preferred) → lang: \(lang)")
+        let habitContext: String = {
+            guard let habit else { return "a personal harmful habit" }
+            if habit == .other {
+                let trimmed = customHabit.trimmingCharacters(in: .whitespaces)
+                return trimmed.isEmpty ? habit.llmContext : trimmed
+            }
+            return habit.llmContext
+        }()
+
+        let payload: [String: Any] = [
+            "trigger": trigger,
+            "lang": lang,
+            "habit": habitContext,
+            "outcome": outcome.rawValue,
+        ]
+
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+
+        var request = URLRequest(url: workerURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Force fresh TCP per request — discourages keep-alive bugs that cause -1005.
+        request.setValue("close", forHTTPHeaderField: "Connection")
+        request.httpBody = body
+        request.timeoutInterval = 15
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+
+        // -1005 ("network connection lost") on iOS is notoriously sticky — it can come
+        // from stale connection pools, mid-request network changes, or iOS bugs. Defense
+        // in depth: fresh ephemeral session per attempt, no connection pooling, wait for
+        // connectivity, three retries with exponential backoff.
+        let backoffsNanos: [UInt64] = [300_000_000, 1_000_000_000, 3_000_000_000]
+        let maxAttempts = 3
+
+        for attempt in 1...maxAttempts {
+            let config = URLSessionConfiguration.ephemeral
+            config.waitsForConnectivity = true
+            config.timeoutIntervalForResource = 20
+            config.httpMaximumConnectionsPerHost = 1
+            let session = URLSession(configuration: config)
+            defer { session.finishTasksAndInvalidate() }
+
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    print("[MindfulPause] Worker non-200 (attempt \(attempt)): \(code)")
+                    if attempt == maxAttempts { return nil }
+                    try? await Task.sleep(nanoseconds: backoffsNanos[attempt - 1])
+                    continue
+                }
+                guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+                if let model = parsed["model"] as? String {
+                    print("[MindfulPause] AI model: \(model) (attempt \(attempt))")
+                }
+                return parsed["tip"] as? String
+            } catch {
+                print("[MindfulPause] AI fetch error (attempt \(attempt)): \(error.localizedDescription)")
+                if attempt == maxAttempts { return nil }
+                try? await Task.sleep(nanoseconds: backoffsNanos[attempt - 1])
+            }
+        }
+        return nil
+    }
+
+    private func localFallbackTip() -> String {
+        guard let resource = fallbackTips.randomElement() else { return "" }
+        return String(localized: resource)
     }
 
     private func saveState() {
