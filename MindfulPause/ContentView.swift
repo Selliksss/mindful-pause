@@ -398,6 +398,14 @@ struct ContentView: View {
                     }
                 }
 
+                HStack(spacing: 4) {
+                    Link("Privacy", destination: URL(string: "https://mindful-pause-llm.vercel.app/privacy")!)
+                    Text("·")
+                    Link("Terms", destination: URL(string: "https://mindful-pause-llm.vercel.app/terms")!)
+                }
+                .font(.system(size: 12, weight: .light, design: .rounded))
+                .foregroundStyle(mutedColor.opacity(0.8))
+
                 Text("Powered by Claude (Anthropic)")
                     .font(.system(size: 11, weight: .light, design: .rounded))
                     .foregroundStyle(mutedColor.opacity(0.6))
