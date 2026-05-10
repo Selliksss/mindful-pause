@@ -73,6 +73,10 @@ struct ContentView: View {
     }()
     @State private var customHabit: String = UserDefaults.standard.string(forKey: "MindfulPauseCustomHabit") ?? ""
     @State private var showOnboarding: Bool = UserDefaults.standard.string(forKey: "MindfulPauseHabit") == nil
+    // nil = user hasn't been asked yet; true/false = explicit decision.
+    @State private var aiConsent: Bool? = UserDefaults.standard.object(forKey: "MindfulPauseAIConsent") as? Bool
+    @State private var showConsent: Bool = false
+    @State private var showSettings: Bool = false
 
     private let textColor = Color(red: 0.18, green: 0.15, blue: 0.10)
     private let mutedColor = Color(red: 0.42, green: 0.37, blue: 0.28)
@@ -125,9 +129,12 @@ struct ContentView: View {
                     VStack {
                         HStack {
                             Spacer()
-                            Button(action: openOnboarding) {
-                                Text("Change habit")
-                                    .font(.system(size: 13, weight: .light, design: .rounded))
+                            Button {
+                                haptic(.light)
+                                showSettings = true
+                            } label: {
+                                Image(systemName: "gearshape")
+                                    .font(.system(size: 18, weight: .light))
                                     .foregroundStyle(mutedColor)
                                     .padding(.horizontal, 14)
                                     .padding(.vertical, 8)
@@ -141,6 +148,13 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: showOnboarding)
         .animation(.easeInOut(duration: 0.4), value: habit)
+        .sheet(isPresented: $showConsent) {
+            consentSheet
+                .interactiveDismissDisabled(true)
+        }
+        .sheet(isPresented: $showSettings) {
+            settingsSheet
+        }
         .onAppear {
             loadHabit()
             restoreState()
@@ -347,6 +361,134 @@ struct ContentView: View {
         }
     }
 
+    private var consentSheet: some View {
+        ZStack {
+            backgroundColor.ignoresSafeArea()
+            VStack(spacing: 24) {
+                Text("A real response, not a generic one")
+                    .font(.system(size: 26, weight: .light, design: .rounded))
+                    .foregroundStyle(textColor)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 32)
+
+                Text("To respond to your specific moment, the app sends your reflection text to AI and gets back a tailored tip. Without AI, you'll only see short pre-written tips — they help, but won't reflect what you actually wrote.\n\nYour text isn't tied to any account and isn't stored by us. You can change this anytime in Settings.")
+                    .font(.system(size: 15, weight: .light, design: .rounded))
+                    .foregroundStyle(mutedColor)
+                    .multilineTextAlignment(.leading)
+                    .padding(.horizontal, 8)
+
+                Spacer()
+
+                VStack(spacing: 12) {
+                    Button(action: didAcceptAI) {
+                        Text("Use AI")
+                            .font(.system(size: 17, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .background(accentColor)
+                            .clipShape(Capsule())
+                    }
+
+                    Button(action: didDeclineAI) {
+                        Text("Use offline tips only")
+                            .font(.system(size: 15, weight: .light, design: .rounded))
+                            .foregroundStyle(mutedColor)
+                            .padding(.vertical, 8)
+                    }
+                }
+
+                Text("Powered by Claude (Anthropic)")
+                    .font(.system(size: 11, weight: .light, design: .rounded))
+                    .foregroundStyle(mutedColor.opacity(0.6))
+                    .padding(.bottom, 8)
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 12)
+        }
+    }
+
+    private var settingsSheet: some View {
+        ZStack {
+            backgroundColor.ignoresSafeArea()
+            VStack(spacing: 24) {
+                HStack {
+                    Text("Settings")
+                        .font(.system(size: 26, weight: .light, design: .rounded))
+                        .foregroundStyle(textColor)
+                    Spacer()
+                    Button {
+                        haptic(.light)
+                        showSettings = false
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .light))
+                            .foregroundStyle(mutedColor)
+                    }
+                }
+                .padding(.top, 24)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Habit")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(mutedColor)
+                    Button {
+                        haptic(.light)
+                        showSettings = false
+                        // Defer onboarding open so the sheet has time to dismiss.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            openOnboarding()
+                        }
+                    } label: {
+                        HStack {
+                            Text(habit?.displayName ?? "Not set")
+                                .font(.system(size: 16, weight: .light, design: .rounded))
+                                .foregroundStyle(textColor)
+                            Spacer()
+                            Text("Change")
+                                .font(.system(size: 14, weight: .light, design: .rounded))
+                                .foregroundStyle(accentColor)
+                        }
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(textColor.opacity(0.05))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("AI tips")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundStyle(mutedColor)
+                    Toggle(isOn: Binding(
+                        get: { aiConsent == true },
+                        set: { newValue in
+                            haptic(.light)
+                            setAIConsent(newValue)
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Use AI for personalized tips")
+                                .font(.system(size: 16, weight: .light, design: .rounded))
+                                .foregroundStyle(textColor)
+                            Text("Reflection text is sent to Claude (Anthropic)")
+                                .font(.system(size: 12, weight: .light, design: .rounded))
+                                .foregroundStyle(mutedColor)
+                        }
+                    }
+                    .tint(accentColor)
+                    .padding(.vertical, 12)
+                    .padding(.horizontal, 16)
+                    .background(textColor.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle = .light) {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
@@ -446,10 +588,29 @@ struct ContentView: View {
         haptic(.medium)
         triggerFocused = false
         currentTip = nil
-        isLoadingTip = true
         state = .tip
         saveState()
 
+        // First-time consent gate: don't fetch anything until the user decides.
+        // Defers the network call to didAcceptAI() / didDeclineAI() handlers.
+        if aiConsent == nil {
+            isLoadingTip = false
+            showConsent = true
+            return
+        }
+
+        runTipFetch()
+    }
+
+    private func runTipFetch() {
+        // Consent declined → keep everything on-device.
+        if aiConsent == false {
+            isLoadingTip = false
+            currentTip = localFallbackTip()
+            return
+        }
+
+        isLoadingTip = true
         let trigger = self.trigger
         let outcome = self.outcome ?? .resisted
         let habit = self.habit
@@ -464,10 +625,34 @@ struct ContentView: View {
         }
     }
 
+    private func setAIConsent(_ value: Bool) {
+        aiConsent = value
+        UserDefaults.standard.set(value, forKey: "MindfulPauseAIConsent")
+        UserDefaults.standard.synchronize()
+    }
+
+    private func didAcceptAI() {
+        haptic(.medium)
+        setAIConsent(true)
+        showConsent = false
+        // If we're mid-tip flow (user just submitted reflection), kick off the fetch now.
+        if state == .tip && currentTip == nil && !isLoadingTip {
+            runTipFetch()
+        }
+    }
+
+    private func didDeclineAI() {
+        haptic(.light)
+        setAIConsent(false)
+        showConsent = false
+        if state == .tip && currentTip == nil && !isLoadingTip {
+            runTipFetch()
+        }
+    }
+
     private func fetchAITip(trigger: String, outcome: Outcome, habit: Habit?, customHabit: String) async -> String? {
         let preferred = Bundle.main.preferredLocalizations.first ?? "en"
         let lang = preferred.hasPrefix("ru") ? "ru" : "en"
-        print("[MindfulPause] preferredLocalization: \(preferred) → lang: \(lang)")
         let habitContext: String = {
             guard let habit else { return "a personal harmful habit" }
             if habit == .other {
@@ -489,6 +674,7 @@ struct ContentView: View {
         var request = URLRequest(url: workerURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(AppSecret.apiKey, forHTTPHeaderField: "x-app-key")
         // Force fresh TCP per request — discourages keep-alive bugs that cause -1005.
         request.setValue("close", forHTTPHeaderField: "Connection")
         request.httpBody = body
